@@ -4425,7 +4425,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       line: "D9E2EE"
     };
     const PPT_STYLE = {
-      canvas: "E5E7EB",
+      canvas: "FFFFFF",
       surface: "FFFFFF",
       surfaceMuted: "F7F7FA",
       ink: "1D1D1F",
@@ -4441,14 +4441,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       lineStrong: "D1D1D6",
       font: "Aptos",
       display: "Aptos Display"
-    };
-    const PPT_SHADOW = {
-      type: "outer",
-      color: "000000",
-      opacity: 0.1,
-      blur: 2,
-      angle: 45,
-      distance: 1
     };
 
     const state = {
@@ -5036,7 +5028,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const config = finalizeConfig(extractConfig(workbook, rows), workbook, kpisName);
       const detailSeries = parseDetailSheets(workbook, config, kpisName);
       const col = {
-        no: findCol(headers, ["FOLIO", "NO.", "NO"]),
+        no: findCol(headers, ["NO.", "NO", "NUMERO", "FOLIO"]),
         objective: findCol(headers, ["NOMBRE DEL OBJETIVO ESTRATEGICO", "NOMBRE DEL OBJETIVO"]),
         metric: findCol(headers, ["NOMBRE DEL INDICADOR", "METRICA"]),
         unit: findCol(headers, ["UNIDAD DE MEDICION", "UNIDAD"]),
@@ -5054,7 +5046,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
       for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
         const row = rows[rowIndex] || [];
-        const id = clean(row[col.no]) || String(currentRows.length + 1);
+        const sourceId = clean(row[col.no]);
+        const id = sourceId || String(currentRows.length + 1);
         const objective = clean(row[col.objective]);
         const metric = clean(row[col.metric]);
         if (!isKpiDataRow({ id, objective, metric })) continue;
@@ -5074,23 +5067,52 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if (detail) {
           series = mergeDetailSeries(series, detail.series);
         }
+        const formulaFlags = {
+          current: cellHasFormula(sheet, rowIndex, col.current),
+          budget: cellHasFormula(sheet, rowIndex, col.budget),
+          compliance: cellHasFormula(sheet, rowIndex, col.compliance),
+          weighted: cellHasFormula(sheet, rowIndex, col.weighted)
+        };
         const primaryFormats = [
           valueFormats.budget,
           valueFormats.current,
           ...Object.values(valueFormats.months)
         ].filter(Boolean);
-        const current = firstNumber(toNumber(row[col.current]), valueForMonth(series, config.selectedMonth, "current"), toNumber(row[col.accumulated]));
-        const budget = toNumber(row[col.budget]);
+        const summaryCurrent = toNumber(row[col.current]);
+        const detailCurrent = valueForMonth(series, config.selectedMonth, "current");
+        const summaryBudget = toNumber(row[col.budget]);
+        const detailBudget = valueForMonth(series, config.selectedMonth, "budget");
+        const summaryCurrentIsStaleZero = formulaFlags.current
+          && summaryCurrent === 0
+          && detailCurrent != null
+          && detailCurrent !== 0;
+        const summaryBudgetIsStaleZero = formulaFlags.budget
+          && summaryBudget === 0
+          && detailBudget != null
+          && detailBudget !== 0;
+        const current = summaryCurrentIsStaleZero
+          ? firstNumber(detailCurrent, summaryCurrent, toNumber(row[col.accumulated]))
+          : firstNumber(summaryCurrent, detailCurrent, toNumber(row[col.accumulated]));
+        const budget = summaryBudgetIsStaleZero
+          ? firstNumber(detailBudget, summaryBudget)
+          : firstNumber(summaryBudget, detailBudget);
         const unit = clean(row[col.unit]);
         const hasNumericData = [row[col.accumulated], row[col.budget], row[col.current], row[col.compliance], row[col.weight], row[col.weighted], ...MONTHS.map(month => row[monthCols[month]])]
           .some(value => toNumber(value) != null);
         if (!metric && !hasNumericData) continue;
-        const compliance = firstNumber(normalizeRatioNumber(row[col.compliance]), computeCompliance(current, budget, { metric, objective, unit }));
+        const storedCompliance = normalizeRatioNumber(row[col.compliance]);
+        const computedCompliance = computeCompliance(current, budget, { metric, objective, unit });
+        const compliance = formulaFlags.compliance
+          ? firstNumber(computedCompliance, storedCompliance)
+          : firstNumber(storedCompliance, computedCompliance);
         const weight = normalizeRatioNumber(row[col.weight]);
+        const storedWeighted = normalizeRatioNumber(row[col.weighted]);
+        const computedWeighted = weight != null && compliance != null ? weight * compliance : null;
         const valueType = inferValueType({ objective, metric, unit, formats: primaryFormats, accumulatedFormat: valueFormats.accumulated });
 
         currentRows.push({
           id,
+          sourceId,
           objective,
           metric,
           unit,
@@ -5103,14 +5125,19 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           current,
           compliance,
           weight,
-          weightedScore: firstNumber(normalizeRatioNumber(row[col.weighted]), weight != null && compliance != null ? weight * compliance : null),
+          weightedScore: formulaFlags.weighted
+            ? firstNumber(computedWeighted, storedWeighted)
+            : firstNumber(storedWeighted, computedWeighted),
+          formulaFlags,
           detailSheet: detail?.sheetName || "",
           series
         });
       }
 
       const previous = parsePreviousYear(workbook, config.currentYear);
-      const mergedRows = currentRows.map(row => mergePrevious(row, previous));
+      const mergedRows = ensureUniqueKpiIds(currentRows)
+        .filter(hasActiveIndicatorWeight)
+        .map(row => mergePrevious(row, previous));
       return {
         process: "Planeación Estratégica",
         selectedMonth: config.selectedMonth || latestMonthWithData(mergedRows) || "MAYO",
@@ -5501,7 +5528,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         prepared.valueType = normalizeValueType(prepared.valueType) || inferValueType(prepared);
         prepared.key = kpiKey(`${prepared.id} ${prepared.metric || prepared.objective}`);
         return prepared;
-      });
+      }).filter(hasActiveIndicatorWeight);
       return {
         process: data.process || "Planeación Estratégica",
         selectedMonth: normalizeMonth(data.selectedMonth) || "MAYO",
@@ -5569,7 +5596,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         return;
       }
       els.kpiCards.innerHTML = rows.map(row => {
-        const values = periodValues(row);
+        const values = comparisonValues(row);
         const compareType = chartValueType(row, [{ previousFormat: values.previousFormat, currentFormat: values.currentFormat, budgetFormat: values.budgetFormat }]);
         const max = maxForChart([
           chartNumber(values.previous, row, values.previousFormat, compareType),
@@ -5639,7 +5666,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         renderEvidence(null);
         return;
       }
-      const values = periodValues(row);
+      const values = comparisonValues(row);
       const compliance = periodCompliance(row);
       const status = statusFor(compliance);
       const compareType = chartValueType(row, [{ previousFormat: values.previousFormat, currentFormat: values.currentFormat, budgetFormat: values.budgetFormat }]);
@@ -5749,8 +5776,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function kpiMetaItems(row) {
       const values = periodValues(row);
       const compliance = periodCompliance(row);
-      const weight = normalizeRatioNumber(row.weight);
-      const weighted = firstNumber(normalizeRatioNumber(row.weightedScore), weight != null && compliance != null ? weight * compliance : null);
+      const weighted = periodWeightedScore(row);
       return [
         {
           label: "Indicador / medición",
@@ -6120,9 +6146,45 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       };
     }
 
+    function comparisonValues(row) {
+      const summaryValues = periodValues(row);
+      if (valueTypeFor(row) !== "currency") return summaryValues;
+      const month = normalizeMonth(state.selectedMonth);
+      const point = (row.series || []).find(item => normalizeMonth(item.month) === month) || {};
+      const pointCurrent = toNumber(point.current);
+      const pointPrevious = toNumber(point.previous);
+      const pointBudget = toNumber(point.budget);
+      return {
+        current: firstNumber(pointCurrent, summaryValues.current),
+        previous: firstNumber(pointPrevious, summaryValues.previous),
+        budget: firstNumber(pointBudget, summaryValues.budget),
+        currentFormat: clean(pointCurrent != null ? point.currentFormat : summaryValues.currentFormat),
+        previousFormat: clean(pointPrevious != null ? point.previousFormat : summaryValues.previousFormat),
+        budgetFormat: clean(pointBudget != null ? point.budgetFormat : summaryValues.budgetFormat)
+      };
+    }
+
     function periodCompliance(row) {
       const values = periodValues(row);
-      return firstNumber(normalizeRatioNumber(row.compliance), computeCompliance(values.current, values.budget, row));
+      const stored = normalizeRatioNumber(row.compliance);
+      const computed = computeCompliance(values.current, values.budget, row);
+      const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
+      if (!selectedIsSourceMonth || row.formulaFlags?.compliance) {
+        return firstNumber(computed, stored);
+      }
+      return firstNumber(stored, computed);
+    }
+
+    function periodWeightedScore(row) {
+      const stored = normalizeRatioNumber(row.weightedScore);
+      const compliance = periodCompliance(row);
+      const weight = normalizeRatioNumber(row.weight);
+      const computed = weight != null && compliance != null ? weight * compliance : null;
+      const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
+      if (!selectedIsSourceMonth || row.formulaFlags?.weighted) {
+        return firstNumber(computed, stored);
+      }
+      return firstNumber(stored, computed);
     }
 
     function valueForMonth(series, month, key) {
@@ -6142,7 +6204,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const text = typeof rowOrMetric === "string"
         ? normalize(rowOrMetric)
         : normalize(`${rowOrMetric?.unit || ""} ${rowOrMetric?.metric || ""} ${rowOrMetric?.objective || ""}`);
-      if (/(TICKET|VENTA|INGRESO|MARGEN|FILL RATE|PARTICIPACION|CONOCIMIENTO)/.test(text)) return false;
+      if (/(OTIF|ON TIME IN FULL|A TIEMPO Y COMPLETO|TICKET|VENTA|INGRESO|MARGEN|FILL RATE|PARTICIPACION|CONOCIMIENTO)/.test(text)) return false;
       return /(ROTACION|BAJA|DISMINUIR|REDUCIR|MAXIMO|MAXIMA|MENOR|MENOS|TIEMPO|DIAS|DIA|MESES ACTUALES|PLAZO|RETRASO)/.test(text);
     }
 
@@ -6167,7 +6229,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const values = periodValues(row);
       const compliance = periodCompliance(row);
       const weight = normalizeRatioNumber(row.weight);
-      const weighted = firstNumber(normalizeRatioNumber(row.weightedScore), weight != null && compliance != null ? weight * compliance : null);
+      const weighted = periodWeightedScore(row);
       return {
         objective: objectiveLabel(row),
         metric: shorten(row.metric || "", 58),
@@ -6230,6 +6292,24 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
       const cell = sheet[address];
       return clean(cell?.z || cell?.w || "");
+    }
+
+    function cellHasFormula(sheet, rowIndex, colIndex) {
+      if (!sheet || colIndex == null || rowIndex == null || !window.XLSX) return false;
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+      return Boolean(clean(sheet[address]?.f));
+    }
+
+    function ensureUniqueKpiIds(rows) {
+      const ids = (rows || []).map(row => clean(row.id));
+      const normalizedIds = ids.map(normalize);
+      const reliable = ids.every(Boolean) && new Set(normalizedIds).size === ids.length;
+      if (reliable) return rows;
+      return (rows || []).map((row, index) => ({
+        ...row,
+        sourceId: clean(row.sourceId || row.id),
+        id: String(index + 1)
+      }));
     }
 
     function findSheetName(workbook, candidates) {
@@ -6395,6 +6475,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return null;
     }
 
+    function hasActiveIndicatorWeight(row) {
+      const weight = normalizeRatioNumber(row?.weight);
+      return weight == null || Math.abs(weight) > 1e-12;
+    }
+
     function sum(values) {
       const valid = values.map(toNumber).filter(value => value != null);
       return valid.reduce((acc, value) => acc + value, 0);
@@ -6440,7 +6525,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     function formatHasCurrency(format) {
-      return clean(format).includes("$") || normalize(format).includes("MXN") || normalize(format).includes("USD");
+      const raw = clean(format);
+      const text = normalize(format);
+      return /[$€£¥]/.test(raw) || /(MXN|USD|PESOS?|DOLARES?|MONEDA)/.test(text);
     }
 
     function formatHasPercent(format) {
@@ -6455,17 +6542,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function inferValueType(row) {
       const text = normalize(`${row?.unit || ""} ${row?.metric || ""} ${row?.objective || ""}`);
+      const unitText = normalize(row?.unit || "");
+      const titleText = normalize(`${row?.objective || ""} ${row?.metric || ""}`);
       const formats = Array.isArray(row?.formats) ? row.formats : [row?.accumulatedFormat];
       const hasCurrencyFormat = formats.some(formatHasCurrency);
       const hasPercentFormat = formats.some(formatHasPercent);
+      const explicitCurrencyUnit = formatHasCurrency(row?.unit || "");
+      const explicitPercentUnit = unitText === "%" || /(PORCENTAJE|PERCENT)/.test(unitText);
+      const explicitCountException = /(CERO ACCIDENTES|NUMERO DE ACCIDENTES)/.test(titleText);
 
-      if (hasCurrencyFormat) return "currency";
+      if (hasCurrencyFormat || explicitCurrencyUnit) return "currency";
+      if (hasPercentFormat) return "percent";
+      if (explicitPercentUnit && !explicitCountException) return "percent";
+      if (/((^|\s)#(\s|$)|CANTIDAD|NUMERO|PIEZAS|MOLDES|PROYECTOS|CLIENTES|PRODUCTOS|DOCUMENTOS|SOLICITUDES|ACCIDENTES|QUEJAS)/.test(text)) return "count";
+      if (text.includes("%") || /(PORCENTAJE|TASA|MARGEN|AVANCE|CUMPLIMIENTO|PARTICIPACION)/.test(text)) return "percent";
       if (/(DIAS|DIA|MESES|MES|HORAS|HORA|TIEMPO|PLAZO|ANTIGUEDAD)/.test(text)) return "duration";
       if (/(PRUEBA ACIDA|ROTACION)/.test(text)) return "number";
       if (/(INDICE|INDEX|RATIO|RAZON|FACTOR)/.test(text) && !/(PORCENTAJE|TASA|MARGEN|AVANCE|CUMPLIMIENTO|PARTICIPACION|%)/.test(text)) return "number";
-      if (/((^|\s)#(\s|$)|CANTIDAD|NUMERO|PIEZAS|MOLDES|PROYECTOS|CLIENTES|PRODUCTOS|DOCUMENTOS|SOLICITUDES|ACCIDENTES|QUEJAS)/.test(text) && !hasPercentFormat) return "count";
-      if (hasPercentFormat) return "percent";
-      if (text.includes("%") || /(PORCENTAJE|TASA|MARGEN|AVANCE|CUMPLIMIENTO|PARTICIPACION)/.test(text)) return "percent";
       if (/(\$|MXN|PESO|IMPORTE|MONTO|TICKET|PRECIO|FACTURADO|FACTURA|VENTA|INGRESO|VALOR)/.test(text)) return "currency";
       return "number";
     }
@@ -6532,15 +6625,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     function normalizePercentNumber(value) {
-      const num = toNumber(value);
-      if (num == null) return null;
-      return Math.abs(num) > 1.5 ? num / 100 : num;
+      return toNumber(value);
     }
 
     function normalizeRatioNumber(value) {
-      const num = toNumber(value);
-      if (num == null) return null;
-      return Math.abs(num) > 3 ? num / 100 : num;
+      return toNumber(value);
     }
 
     function formatValue(value, row, formatHint = "") {
@@ -6655,7 +6744,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if (type === "currency") return formatCurrency(num, true);
       if (type === "duration") return formatDuration(num, row, true);
       if (Math.abs(num) >= 1000) return formatThousands(num).replace(" mil", "k");
-      return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(num);
+      const abs = Math.abs(num);
+      const digits = abs > 0 && abs < 0.1 ? 3 : abs > 0 && abs < 1 ? 2 : abs < 10 ? 1 : 0;
+      return new Intl.NumberFormat("es-MX", { maximumFractionDigits: digits }).format(num);
     }
 
     function formatDate(value) {
@@ -6871,8 +6962,16 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
         const fileName = `Seguimiento_KPIs_${state.data.currentYear}_${normalize(state.selectedMonth).toLowerCase()}.pptx`;
         const rawPptx = await pptx.write({ outputType: "blob" });
-        const repairedPptx = await repairPptxBlob(rawPptx);
-        downloadBlob(repairedPptx, fileName);
+        const expectedSlides = 3 + state.data.rows.length + state.data.rows.filter(row => evidenceFor(row).length).length;
+        let downloadablePptx = rawPptx;
+        try {
+          const repairedPptx = await repairPptxBlob(rawPptx);
+          downloadablePptx = await validatePptxBlob(repairedPptx, expectedSlides);
+        } catch (repairError) {
+          console.warn("Se usará el PowerPoint original porque la validación de compatibilidad falló.", repairError);
+          downloadablePptx = await validatePptxBlob(rawPptx, expectedSlides);
+        }
+        downloadBlob(downloadablePptx, fileName);
         showToast("PowerPoint generado.");
       } catch (error) {
         console.error(error);
@@ -6934,15 +7033,39 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       });
     }
 
+    async function validatePptxBlob(blob, expectedSlides = null) {
+      const mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length < 10000 || bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
+        throw new Error("El archivo generado no contiene un PowerPoint completo.");
+      }
+      if (window.JSZip) {
+        const zip = await JSZip.loadAsync(buffer, { checkCRC32: true });
+        const required = ["[Content_Types].xml", "_rels/.rels", "ppt/presentation.xml"];
+        if (required.some(name => !zip.file(name))) {
+          throw new Error("El PowerPoint generado no contiene su estructura principal.");
+        }
+        const slideCount = Object.keys(zip.files)
+          .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+          .length;
+        if (!slideCount || (expectedSlides != null && slideCount !== expectedSlides)) {
+          throw new Error("El número de láminas generado no coincide con los KPIs.");
+        }
+      }
+      return new Blob([buffer], { type: mimeType });
+    }
+
     function downloadBlob(blob, fileName) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = fileName;
+      link.style.display = "none";
       document.body.appendChild(link);
       link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setTimeout(() => link.remove(), 5000);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
     function addCoverSlide(pptx) {
@@ -7177,13 +7300,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     function paintSlideBase(pptx, slide, mode) {
-      slide.background = { color: PPT_STYLE.canvas };
-      slide.addShape("roundRect", {
-        x: 0.26, y: 0.2, w: 12.81, h: 6.5,
-        fill: { color: PPT_STYLE.surface },
-        line: { color: PPT_STYLE.line, width: 0.7 },
-        shadow: PPT_SHADOW
-      });
+      slide.background = { color: PPT_STYLE.surface };
     }
 
     function addSlideHeader(slide, title, subtitle) {
@@ -7231,8 +7348,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       slide.addShape("roundRect", {
         x, y, w, h,
         fill: { color: fill },
-        line: { color: PPT_STYLE.line, width: 0.6 },
-        ...(shadow ? { shadow: PPT_SHADOW } : {})
+        line: { color: PPT_STYLE.line, width: 0.6 }
       });
     }
 
@@ -7268,8 +7384,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       slide.addShape("roundRect", {
         x, y, w, h,
         fill: { color: PPT_STYLE.surface },
-        line: { color: PPT_STYLE.line, width: 0.5 },
-        shadow: PPT_SHADOW
+        line: { color: PPT_STYLE.line, width: 0.5 }
       });
       const gap = w * 0.06;
       const cellW = (w - gap * 3) / 2;
@@ -7342,10 +7457,24 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         fill: { color: PPT_STYLE.ink }, line: { color: PPT_STYLE.ink }
       });
       if (!compact) {
-        slide.addText("0%                 80%      100%      120%", {
-          x: barX, y: barY + 0.19, w: barW, h: 0.12,
-          fontFace: PPT_STYLE.font, fontSize: 6.5, color: PPT_STYLE.muted,
-          align: "center", margin: 0.01, fit: "shrink"
+        [
+          ["0%", 0],
+          ["80%", 0.8 / 1.2],
+          ["100%", 1 / 1.2],
+          ["120%", 1]
+        ].forEach((item, idx) => {
+          const labelW = 0.4;
+          const centerX = barX + barW * item[1];
+          const labelX = idx === 0
+            ? barX - 0.02
+            : idx === 3
+              ? barX + barW - labelW + 0.02
+              : centerX - labelW / 2;
+          slide.addText(item[0], {
+            x: labelX, y: barY + 0.19, w: labelW, h: 0.11,
+            fontFace: PPT_STYLE.font, fontSize: 5.5, color: PPT_STYLE.muted,
+            align: "center", margin: 0, fit: "shrink"
+          });
         });
       }
     }
@@ -7381,8 +7510,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       slide.addShape("roundRect", {
         x, y, w: 2.0, h: 1.05,
         fill: { color: fill },
-        line: { color: fill === PPT_STYLE.graphite ? PPT_STYLE.graphite : PPT_STYLE.line, width: 0.6 },
-        ...(fill === PPT_STYLE.graphite ? { shadow: PPT_SHADOW } : {})
+        line: { color: fill === PPT_STYLE.graphite ? PPT_STYLE.graphite : PPT_STYLE.line, width: 0.6 }
       });
       const muted = textColor === PPT_STYLE.surface ? "D7D7DC" : PPT_STYLE.muted;
       slide.addText(label, {
@@ -7542,7 +7670,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     function addKpiCompareBars(pptx, slide, row, x, y, w, h) {
-      const values = periodValues(row);
+      const values = comparisonValues(row);
       const items = [
         [`Año anterior ${state.data.previousYear}`, values.previous, PPT_STYLE.slate, values.previousFormat],
         [`Año actual ${state.data.currentYear}`, values.current, PPT_STYLE.graphite, values.currentFormat],
