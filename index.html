@@ -6621,7 +6621,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function chartValueType(row, points = []) {
       const explicitType = explicitUnitValueType(row);
-      if (hasMonetaryChartEvidence(row, points)) return "currency";
+      if (
+        hasMonetaryChartEvidence(row, points)
+        || hasMonetaryChartEvidence(row, row?.series || [])
+      ) return "currency";
       if (explicitType) return explicitType;
       const formats = points.flatMap(point => [
         point?.previousFormat,
