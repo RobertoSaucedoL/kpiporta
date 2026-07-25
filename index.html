@@ -5103,13 +5103,19 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           && summaryCurrent === 0
           && detailCurrent != null
           && detailCurrent !== 0;
+        const summaryCurrentIsUnavailableFormula = formulaFlags.current
+          && detail
+          && detailCurrent == null
+          && (summaryCurrent == null || summaryCurrent === 0);
         const summaryBudgetIsStaleZero = formulaFlags.budget
           && summaryBudget === 0
           && detailBudget != null
           && detailBudget !== 0;
-        const current = summaryCurrentIsStaleZero
-          ? firstNumber(detailCurrent, summaryCurrent, toNumber(row[col.accumulated]))
-          : firstNumber(summaryCurrent, detailCurrent, toNumber(row[col.accumulated]));
+        const current = summaryCurrentIsUnavailableFormula
+          ? null
+          : (summaryCurrentIsStaleZero
+            ? firstNumber(detailCurrent, summaryCurrent)
+            : firstNumber(summaryCurrent, detailCurrent));
         const budget = summaryBudgetIsStaleZero
           ? firstNumber(detailBudget, summaryBudget)
           : firstNumber(summaryBudget, detailBudget);
@@ -5119,9 +5125,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if (!metric && !hasNumericData) continue;
         const storedCompliance = normalizeRatioNumber(row[col.compliance]);
         const computedCompliance = computeCompliance(current, budget, { metric, objective, unit });
-        const compliance = formulaFlags.compliance
-          ? firstNumber(computedCompliance, storedCompliance)
-          : firstNumber(storedCompliance, computedCompliance);
+        const compliance = formulaFlags.compliance && current == null
+          ? null
+          : (formulaFlags.compliance
+            ? firstNumber(computedCompliance, storedCompliance)
+            : firstNumber(storedCompliance, computedCompliance));
         const weight = normalizeRatioNumber(row[col.weight]);
         const storedWeighted = normalizeRatioNumber(row[col.weighted]);
         const computedWeighted = weight != null && compliance != null ? weight * compliance : null;
@@ -5142,9 +5150,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           current,
           compliance,
           weight,
-          weightedScore: formulaFlags.weighted
-            ? firstNumber(computedWeighted, storedWeighted)
-            : firstNumber(storedWeighted, computedWeighted),
+          weightedScore: formulaFlags.weighted && compliance == null
+            ? null
+            : (formulaFlags.weighted
+              ? firstNumber(computedWeighted, storedWeighted)
+              : firstNumber(storedWeighted, computedWeighted)),
           formulaFlags,
           detailSheet: detail?.sheetName || "",
           series
@@ -5475,28 +5485,68 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const cambiarMes = findSheetName(workbook, ["CAMBIAR MES", "MES"]);
       const configRows = cambiarMes ? sheetRows(workbook, cambiarMes) : [];
       const allRows = [...configRows, ...kpiRows];
-      let selectedMonth = null;
+      const selectedMonth = findDeclaredMonth(configRows)
+        || firstMonthInRows(configRows)
+        || findDeclaredMonth(kpiRows);
       const configYears = [];
       const allYears = [];
 
       for (const row of configRows) {
         for (const cell of row || []) {
-          const month = normalizeMonth(cell);
-          if (month) selectedMonth = selectedMonth || month;
           const num = toNumber(cell);
           if (num && num > 2000 && num < 2100) configYears.push(Math.round(num));
         }
       }
       for (const row of allRows) {
         for (const cell of row || []) {
-          const month = normalizeMonth(cell);
-          if (month) selectedMonth = selectedMonth || month;
           const num = toNumber(cell);
           if (num && num > 2000 && num < 2100) allYears.push(Math.round(num));
         }
       }
       const currentYear = chooseCurrentYear(configYears.length ? configYears : allYears);
       return { selectedMonth, currentYear };
+    }
+
+    function findDeclaredMonth(rows) {
+      for (let rowIndex = 0; rowIndex < (rows || []).length; rowIndex += 1) {
+        const row = rows[rowIndex] || [];
+        const monthLabels = row
+          .map((cell, columnIndex) => ({ columnIndex, value: normalize(cell) }))
+          .filter(item => ["MES", "MES SELECCIONADO", "PERIODO", "PERIODO KPI"].includes(item.value));
+        for (const label of monthLabels) {
+          const sameRow = row
+            .map((cell, columnIndex) => ({
+              columnIndex,
+              month: columnIndex === label.columnIndex ? null : normalizeMonth(cell)
+            }))
+            .filter(item => item.month)
+            .sort((a, b) => {
+              const aAfter = a.columnIndex > label.columnIndex ? 0 : 1;
+              const bAfter = b.columnIndex > label.columnIndex ? 0 : 1;
+              return aAfter - bAfter
+                || Math.abs(a.columnIndex - label.columnIndex) - Math.abs(b.columnIndex - label.columnIndex);
+            });
+          if (sameRow.length) return sameRow[0].month;
+
+          for (let offset = 1; offset <= 2; offset += 1) {
+            const nearbyRow = rows[rowIndex + offset] || [];
+            const nearbyMonth = normalizeMonth(nearbyRow[label.columnIndex])
+              || firstMonthInRows([nearbyRow]);
+            if (nearbyMonth) return nearbyMonth;
+          }
+        }
+      }
+      return null;
+    }
+
+    function firstMonthInRows(rows) {
+      for (const row of rows || []) {
+        for (const cell of row || []) {
+          const month = normalizeMonth(cell);
+          if (month) return month;
+        }
+      }
+      return null;
     }
 
     function prepareData(data) {
@@ -7983,3 +8033,4 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   </script>
 </body>
 </html>
+
