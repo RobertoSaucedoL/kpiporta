@@ -5622,12 +5622,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function renderSummary() {
       const rows = state.data.rows;
-      const weighted = sum(rows.map(row => {
-        const compliance = periodCompliance(row);
-        const weight = normalizeRatioNumber(row.weight);
-        if (weight == null || compliance == null) return normalizeRatioNumber(row.weightedScore);
-        return weight * compliance;
-      }));
+      const weighted = sumOrNull(rows.map(periodWeightedScore));
       const avg = average(rows.map(periodCompliance));
       const risks = rows.filter(row => {
         const compliance = periodCompliance(row);
@@ -6188,7 +6183,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function periodValues(row) {
       const month = normalizeMonth(state.selectedMonth);
       const point = (row.series || []).find(item => normalizeMonth(item.month) === month) || {};
-      const selectedIsSourceMonth = month === normalizeMonth(state.data?.selectedMonth);
+      const sourceMonth = normalizeMonth(state.data?.selectedMonth);
+      const selectedIsSourceMonth = month === sourceMonth;
+      const selectedMonthIndex = MONTHS.indexOf(month);
+      const sourceMonthIndex = MONTHS.indexOf(sourceMonth);
+      const selectedIsFutureMonth = selectedMonthIndex >= 0
+        && sourceMonthIndex >= 0
+        && selectedMonthIndex > sourceMonthIndex;
       const rowCurrent = toNumber(row.current);
       const pointCurrent = toNumber(point.current);
       const rowPrevious = toNumber(row.previous);
@@ -6196,8 +6197,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const rowBudget = toNumber(row.budget);
       const pointBudget = toNumber(point.budget);
       return {
-        current: selectedIsSourceMonth ? firstNumber(rowCurrent, pointCurrent) : firstNumber(pointCurrent, rowCurrent),
-        previous: selectedIsSourceMonth ? firstNumber(rowPrevious, pointPrevious) : firstNumber(pointPrevious, rowPrevious),
+        current: selectedIsFutureMonth ? null : (selectedIsSourceMonth ? firstNumber(rowCurrent, pointCurrent) : pointCurrent),
+        previous: selectedIsSourceMonth ? firstNumber(rowPrevious, pointPrevious) : pointPrevious,
         budget: selectedIsSourceMonth ? firstNumber(rowBudget, pointBudget) : firstNumber(pointBudget, rowBudget),
         currentFormat: clean((selectedIsSourceMonth && rowCurrent != null) ? row.valueFormats?.current : point.currentFormat || row.valueFormats?.current),
         previousFormat: clean((selectedIsSourceMonth && rowPrevious != null) ? row.previousFormat : point.previousFormat),
@@ -6226,10 +6227,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function periodCompliance(row) {
       const values = periodValues(row);
+      if (values.current == null) return null;
       const stored = normalizeRatioNumber(row.compliance);
       const computed = computeCompliance(values.current, values.budget, row);
       const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
-      if (!selectedIsSourceMonth || row.formulaFlags?.compliance) {
+      if (!selectedIsSourceMonth) return computed;
+      if (row.formulaFlags?.compliance) {
         return firstNumber(computed, stored);
       }
       return firstNumber(stored, computed);
@@ -6238,10 +6241,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function periodWeightedScore(row) {
       const stored = normalizeRatioNumber(row.weightedScore);
       const compliance = periodCompliance(row);
+      if (compliance == null) return null;
       const weight = normalizeRatioNumber(row.weight);
       const computed = weight != null && compliance != null ? weight * compliance : null;
       const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
-      if (!selectedIsSourceMonth || row.formulaFlags?.weighted) {
+      if (!selectedIsSourceMonth) return computed;
+      if (row.formulaFlags?.weighted) {
         return firstNumber(computed, stored);
       }
       return firstNumber(stored, computed);
@@ -6542,6 +6547,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function sum(values) {
       const valid = values.map(toNumber).filter(value => value != null);
+      return valid.reduce((acc, value) => acc + value, 0);
+    }
+
+    function sumOrNull(values) {
+      const valid = values.map(toNumber).filter(value => value != null);
+      if (!valid.length) return null;
       return valid.reduce((acc, value) => acc + value, 0);
     }
 
@@ -8001,12 +8012,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     function weightedScore() {
       const rows = state.data.rows;
-      return sum(rows.map(row => {
-        const compliance = periodCompliance(row);
-        const weight = normalizeRatioNumber(row.weight);
-        if (weight == null || compliance == null) return normalizeRatioNumber(row.weightedScore);
-        return weight * compliance;
-      }));
+      return sumOrNull(rows.map(periodWeightedScore));
     }
 
     function svgToDataUri(svg) {
