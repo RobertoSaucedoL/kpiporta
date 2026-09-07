@@ -5477,9 +5477,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const cambiarMes = findSheetName(workbook, ["CAMBIAR MES", "MES"]);
       const configRows = cambiarMes ? sheetRows(workbook, cambiarMes) : [];
       const allRows = [...configRows, ...kpiRows];
-      const selectedMonth = findDeclaredMonth(configRows)
-        || firstMonthInRows(configRows)
-        || findDeclaredMonth(kpiRows);
+      const selectedMonth = findDeclaredMonth(kpiRows)
+        || findDeclaredMonth(configRows)
+        || firstMonthInRows(configRows);
       const configYears = [];
       const allYears = [];
 
@@ -8028,5 +8028,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   </script>
 </body>
 </html>
+
 
 
