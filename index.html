@@ -5119,9 +5119,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         const computedCompliance = computeCompliance(current, budget, { metric, objective, unit });
         const compliance = formulaFlags.compliance && current == null
           ? null
-          : (formulaFlags.compliance
-            ? firstNumber(computedCompliance, storedCompliance)
-            : firstNumber(storedCompliance, computedCompliance));
+          : firstNumber(storedCompliance, computedCompliance);
         const weight = normalizeRatioNumber(row[col.weight]);
         const storedWeighted = normalizeRatioNumber(row[col.weighted]);
         const computedWeighted = weight != null && compliance != null ? weight * compliance : null;
@@ -5144,9 +5142,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           weight,
           weightedScore: formulaFlags.weighted && compliance == null
             ? null
-            : (formulaFlags.weighted
-              ? firstNumber(computedWeighted, storedWeighted)
-              : firstNumber(storedWeighted, computedWeighted)),
+            : firstNumber(storedWeighted, computedWeighted),
           formulaFlags,
           detailSheet: detail?.sheetName || "",
           series
@@ -6232,9 +6228,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const computed = computeCompliance(values.current, values.budget, row);
       const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
       if (!selectedIsSourceMonth) return computed;
-      if (row.formulaFlags?.compliance) {
-        return firstNumber(computed, stored);
-      }
       return firstNumber(stored, computed);
     }
 
@@ -6246,9 +6239,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       const computed = weight != null && compliance != null ? weight * compliance : null;
       const selectedIsSourceMonth = normalizeMonth(state.selectedMonth) === normalizeMonth(state.data?.selectedMonth);
       if (!selectedIsSourceMonth) return computed;
-      if (row.formulaFlags?.weighted) {
-        return firstNumber(computed, stored);
-      }
       return firstNumber(stored, computed);
     }
 
@@ -6270,7 +6260,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         ? normalize(rowOrMetric)
         : normalize(`${rowOrMetric?.unit || ""} ${rowOrMetric?.metric || ""} ${rowOrMetric?.objective || ""}`);
       if (/(OTIF|ON TIME IN FULL|A TIEMPO Y COMPLETO|TICKET|VENTA|INGRESO|MARGEN|FILL RATE|PARTICIPACION|CONOCIMIENTO)/.test(text)) return false;
-      return /(ROTACION|BAJA|DISMINUIR|REDUCIR|MAXIMO|MAXIMA|MENOR|MENOS|TIEMPO|DIAS|DIA|MESES ACTUALES|PLAZO|RETRASO)/.test(text);
+      return /(ROTACION|CONTROL PRESUPUESTAL.*GAST|GAST.*CONTROL PRESUPUESTAL|\bCOSTOS?\b|\bGASTOS?\b|BAJA|DISMINUIR|REDUCIR|MAXIMO|MAXIMA|MENOR|MENOS|TIEMPO|DIAS|DIA|MESES ACTUALES|PLAZO|RETRASO)/.test(text);
     }
 
     function statusFor(compliance) {
@@ -8028,6 +8018,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   </script>
 </body>
 </html>
+
 
 
 
